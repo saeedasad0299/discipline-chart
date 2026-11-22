@@ -1,12 +1,12 @@
 {
-  "updated": "2026-11-22T16:58:43.245Z",
+  "updated": "2026-11-22T21:55:24.346Z",
   "sample": false,
   "days": [
     {
       "date": "2026-11-20",
       "name": "Fri 20 Nov",
-      "percent": 0,
-      "completed": 0,
+      "percent": 89,
+      "completed": 8,
       "total": 9
     }
   ]

@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Discipline Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root{--bg:#14121f;--card:#1e1b2e;--line:#2d2945;--text:#ece9fb;--mute:#8d88ad;--accent:#8b7bff;--good:#4ade80;--mid:#8b7bff;--low:#fbbf24;--none:#3a3556;--bad:#f87171}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;padding:16px}
+  h1{font-size:18px;margin:0 0 4px;letter-spacing:.18em;text-transform:uppercase}
+  .sub{color:var(--mute);font-size:12px;margin-bottom:14px}
+  .banner{background:#3b2f12;color:#fbbf24;border:1px solid #6b5316;padding:8px 12px;border-radius:10px;font-size:12px;margin-bottom:14px;display:none}
+  .grid{display:grid;gap:14px;grid-template-columns:260px 1fr}
+  @media(max-width:720px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px}
+  .card h2{font-size:12px;margin:0 0 10px;color:var(--mute);letter-spacing:.12em;text-transform:uppercase;font-weight:600}
+  .ringwrap{position:relative;height:200px}
+  .ringcap{text-align:center;color:var(--mute);font-size:12px;margin-top:8px}
+  .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:12px}
+  .stat{background:#17152a;border-radius:10px;padding:10px;text-align:center}
+  .stat b{display:block;font-size:20px}
+  .stat span{font-size:11px;color:var(--mute)}
+  select{background:#17152a;color:var(--text);border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:13px}
+  .head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+  .chartbox{position:relative;height:260px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{padding:8px 6px;text-align:left;border-bottom:1px solid var(--line)}
+  th{color:var(--mute);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.08em}
+  .tag{padding:2px 8px;border-radius:999px;font-size:11px}
+  .ok{background:#12301f;color:var(--good)}
+  .no{background:#3a1616;color:var(--bad)}
+  .nd{background:#2a2740;color:var(--mute)}
+  .full{grid-column:1/-1}
+</style>
+</head>
+<body>
+<h1>Discipline Dashboard</h1>
+<div class="sub" id="updated">Loading...</div>
+<div class="banner" id="sample">Ye SAMPLE data hai. Pehli baar GitHub Action chalne ke baad aapka asli data aa jayega.</div>
+
+<div class="grid">
+  <div class="card">
+    <h2>Today</h2>
+    <div class="ringwrap"><canvas id="ring"></canvas></div>
+    <div class="ringcap" id="ringcap"></div>
+  </div>
+
+  <div class="card">
+    <div class="head">
+      <h2 style="margin:0">Daily progress</h2>
+      <select id="monthSel"></select>
+    </div>
+    <div class="chartbox"><canvas id="bars"></canvas></div>
+    <div class="stats">
+      <div class="stat"><b id="sWorked">-</b><span>Days worked</span></div>
+      <div class="stat"><b id="sAvg">-</b><span>Average</span></div>
+      <div class="stat"><b id="sBest">-</b><span>Best day</span></div>
+    </div>
+  </div>
+
+  <div class="card full">
+    <h2>Month record</h2>
+    <div class="chartbox" style="height:200px"><canvas id="months"></canvas></div>
+    <table style="margin-top:12px">
+      <thead><tr><th>Month</th><th>Days logged</th><th>Days worked</th><th>Average</th><th>Status</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const colorFor = p => p >= 75 ? "#4ade80" : p >= 40 ? "#8b7bff" : p > 0 ? "#fbbf24" : "#3a3556";
+const monthLabel = k => MONTHS[Number(k.slice(5)) - 1] + " " + k.slice(0, 4);
+const todayKey = () => new Date().toLocaleDateString("en-CA");
+
+const centerText = {
+  id: "centerText",
+  afterDraw(c) {
+    const a = c.chartArea, ctx = c.ctx;
+    ctx.save();
+    ctx.fillStyle = "#ece9fb";
+    ctx.font = "700 34px system-ui";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(c.options.plugins.centerText.text, (a.left + a.right) / 2, (a.top + a.bottom) / 2);
+    ctx.restore();
+  }
+};
+
+let barChart;
+
+fetch("data.json?" + Date.now())
+  .then(r => r.json())
+  .then(init)
+  .catch(e => { document.getElementById("updated").textContent = "data.json load nahi hua: " + e; });
+
+function init(d) {
+  const days = (d.days || []).slice().sort((a, b) => a.date.localeCompare(b.date));
+  document.getElementById("updated").textContent = d.updated ? "Last updated: " + new Date(d.updated).toLocaleString() : "";
+  if (d.sample) document.getElementById("sample").style.display = "block";
+  if (!days.length) { document.getElementById("updated").textContent = "Abhi koi din log nahi hua."; return; }
+
+  // Today ring
+  const t = todayKey();
+  const day = days.find(x => x.date === t) || days[days.length - 1];
+  new Chart(document.getElementById("ring"), {
+    type: "doughnut",
+    data: { datasets: [{ data: [day.percent, 100 - day.percent], backgroundColor: [colorFor(day.percent), "#2d2945"], borderWidth: 0 }] },
+    options: { cutout: "76%", plugins: { legend: { display: false }, tooltip: { enabled: false }, centerText: { text: day.percent + "%" } }, maintainAspectRatio: false },
+    plugins: [centerText]
+  });
+  document.getElementById("ringcap").textContent = day.date + "  ·  " + day.completed + " of " + day.total + " tasks";
+
+  // Month selector
+  const keys = [...new Set(days.map(x => x.date.slice(0, 7)))].sort();
+  const sel = document.getElementById("monthSel");
+  keys.slice().reverse().forEach(k => { const o = document.createElement("option"); o.value = k; o.textContent = monthLabel(k); sel.appendChild(o); });
+  sel.onchange = () => drawMonth(days, sel.value);
+  drawMonth(days, sel.value);
+
+  drawAllMonths(days, keys);
+}
+
+function drawMonth(days, key) {
+  const y = Number(key.slice(0, 4)), m = Number(key.slice(5));
+  const n = new Date(y, m, 0).getDate();
+  const byDay = {};
+  days.filter(x => x.date.startsWith(key)).forEach(x => byDay[Number(x.date.slice(8))] = x);
+  const labels = [], data = [];
+  for (let i = 1; i <= n; i++) { labels.push(i); data.push(byDay[i] ? byDay[i].percent : 0); }
+
+  if (barChart) barChart.destroy();
+  barChart = new Chart(document.getElementById("bars"), {
+    type: "bar",
+    data: { labels, datasets: [{ data, backgroundColor: data.map(colorFor), borderRadius: 4 }] },
+    options: {
+      maintainAspectRatio: false,
+      scales: {
+        y: { min: 0, max: 100, ticks: { color: "#8d88ad", callback: v => v + "%" }, grid: { color: "#2d2945" } },
+        x: { ticks: { color: "#8d88ad" }, grid: { display: false } }
+      },
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => c.raw + "%" } } }
+    }
+  });
+
+  const logged = Object.values(byDay);
+  const worked = logged.filter(x => x.percent > 0);
+  const avg = logged.length ? Math.round(logged.reduce((s, x) => s + x.percent, 0) / logged.length) : 0;
+  const best = logged.length ? Math.max(...logged.map(x => x.percent)) : 0;
+  document.getElementById("sWorked").textContent = worked.length + "/" + n;
+  document.getElementById("sAvg").textContent = avg + "%";
+  document.getElementById("sBest").textContent = best + "%";
+}
+
+function drawAllMonths(days, keys) {
+  // fill gaps so a month with no logged days still appears
+  const all = [];
+  let [y, m] = keys[0].split("-").map(Number);
+  const [ly, lm] = keys[keys.length - 1].split("-").map(Number);
+  while (y < ly || (y === ly && m <= lm)) { all.push(y + "-" + String(m).padStart(2, "0")); m++; if (m > 12) { m = 1; y++; } }
+
+  const stats = all.map(k => {
+    const ds = days.filter(x => x.date.startsWith(k));
+    const worked = ds.filter(x => x.percent > 0).length;
+    const avg = ds.length ? Math.round(ds.reduce((s, x) => s + x.percent, 0) / ds.length) : 0;
+    return { k, logged: ds.length, worked, avg };
+  });
+
+  new Chart(document.getElementById("months"), {
+    type: "bar",
+    data: { labels: stats.map(s => monthLabel(s.k)), datasets: [{ data: stats.map(s => s.avg), backgroundColor: stats.map(s => colorFor(s.avg)), borderRadius: 6 }] },
+    options: {
+      maintainAspectRatio: false,
+      scales: { y: { min: 0, max: 100, ticks: { color: "#8d88ad", callback: v => v + "%" }, grid: { color: "#2d2945" } }, x: { ticks: { color: "#8d88ad" }, grid: { display: false } } },
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => "Average " + c.raw + "%" } } }
+    }
+  });
+
+  const tb = document.getElementById("rows");
+  stats.slice().reverse().forEach(s => {
+    const tr = document.createElement("tr");
+    const status = s.logged === 0 ? ["No data", "nd"] : s.worked === 0 ? ["No work", "no"] : ["Worked", "ok"];
+    tr.innerHTML = "<td>" + monthLabel(s.k) + "</td><td>" + s.logged + "</td><td>" + s.worked + "</td><td>" + s.avg + "%</td><td><span class='tag " + status[1] + "'>" + status[0] + "</span></td>";
+    tb.appendChild(tr);
+  });
+}
+</script>
+</body>
+</html>
